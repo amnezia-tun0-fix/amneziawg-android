@@ -11,4 +11,4 @@ require (
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
 )
 
-replace github.com/amnezia-vpn/amneziawg-go/v3 => github.com/amnezia-tun0-fix/amneziawg-go/v3 v3.0.0-20260928102645-7682a4d67d15
+replace github.com/amnezia-vpn/amneziawg-go/v3 => github.com/amnezia-tun0-fix/amneziawg-go/v3 v3.0.0-20260928134705-342f9ec8872e

@@ -8,6 +8,7 @@ package main
 // #cgo LDFLAGS: -llog
 // #include <android/log.h>
 // #include <stdlib.h>
+// #include <sys/system_properties.h>
 // extern int awgUidFilterAllow(const char *network, const char *src_ip, int src_port, const char *dst_ip, int dst_port);
 import "C"
 
@@ -250,6 +251,20 @@ func awgSetUidFilter(enabled int32) {
 	} else {
 		uidfilter.Set(nil)
 	}
+}
+
+// Experimental builds only: switches for uidfilter's prototypes, read from the
+// system property debug.awg.uf (adb shell setprop debug.awg.uf rv,sa), and its
+// counters, logged under AmneziaWG/uidfilter.
+func init() {
+	uidfilter.ExpLoad = func() uidfilter.ExpOptions {
+		var buf [C.PROP_VALUE_MAX]C.char
+		name := C.CString("debug.awg.uf")
+		defer C.free(unsafe.Pointer(name))
+		n := C.__system_property_get(name, &buf[0])
+		return uidfilter.ParseExpOptions(C.GoStringN(&buf[0], n))
+	}
+	uidfilter.ExpLogf = AndroidLogger{level: C.ANDROID_LOG_INFO, tag: cstring("AmneziaWG/uidfilter")}.Printf
 }
 
 func main() {}

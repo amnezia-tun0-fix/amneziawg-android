@@ -21,6 +21,8 @@ import (
 	"runtime"
 	"runtime/debug"
 	"strings"
+	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
@@ -246,6 +248,9 @@ func (jniUidFilter) Allow(network, srcIP string, srcPort int, dstIP string, dstP
 
 //export awgSetUidFilter
 func awgSetUidFilter(enabled int32) {
+	expStrict.Lock()
+	defer expStrict.Unlock()
+	expStrict.suspended = false
 	if enabled != 0 {
 		uidfilter.Set(jniUidFilter{})
 	} else {
@@ -256,15 +261,48 @@ func awgSetUidFilter(enabled int32) {
 // Experimental builds only: switches for uidfilter's prototypes, read from the
 // system property debug.awg.uf (adb shell setprop debug.awg.uf rv,sa), and its
 // counters, logged under AmneziaWG/uidfilter.
+//
+// debug.awg.strict=0 removes an installed filter, exactly as a tunnel started
+// with the switch off would have none, and any other value puts it back, so one
+// tunnel can be measured with strict mode on and off. Only a filter installed by
+// the app is suspended, and awgSetUidFilter forgets the suspension, so a tunnel
+// that the app starts or stops meanwhile is never given a filter it did not ask for.
 func init() {
 	uidfilter.ExpLoad = func() uidfilter.ExpOptions {
-		var buf [C.PROP_VALUE_MAX]C.char
-		name := C.CString("debug.awg.uf")
-		defer C.free(unsafe.Pointer(name))
-		n := C.__system_property_get(name, &buf[0])
-		return uidfilter.ParseExpOptions(C.GoStringN(&buf[0], n))
+		return uidfilter.ParseExpOptions(expProp("debug.awg.uf"))
 	}
-	uidfilter.ExpLogf = AndroidLogger{level: C.ANDROID_LOG_INFO, tag: cstring("AmneziaWG/uidfilter")}.Printf
+	logf := AndroidLogger{level: C.ANDROID_LOG_INFO, tag: cstring("AmneziaWG/uidfilter")}.Printf
+	uidfilter.ExpLogf = logf
+	go func() {
+		for range time.Tick(time.Second) {
+			off := expProp("debug.awg.strict") == "0"
+			expStrict.Lock()
+			switch {
+			case off && !expStrict.suspended && uidfilter.Get() != nil:
+				uidfilter.Set(nil)
+				expStrict.suspended = true
+				logf("uidfilter-exp-v1: strict suspended (debug.awg.strict=0)")
+			case !off && expStrict.suspended:
+				uidfilter.Set(jniUidFilter{})
+				expStrict.suspended = false
+				logf("uidfilter-exp-v1: strict restored")
+			}
+			expStrict.Unlock()
+		}
+	}()
+}
+
+var expStrict struct {
+	sync.Mutex
+	suspended bool // the app's filter was removed by debug.awg.strict=0
+}
+
+func expProp(key string) string {
+	var buf [C.PROP_VALUE_MAX]C.char
+	name := C.CString(key)
+	defer C.free(unsafe.Pointer(name))
+	n := C.__system_property_get(name, &buf[0])
+	return C.GoStringN(&buf[0], n)
 }
 
 func main() {}
